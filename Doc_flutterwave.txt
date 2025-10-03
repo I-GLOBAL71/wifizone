@@ -1,0 +1,1568 @@
+# Guide Complet d'Intégration de l'API Flutterwave
+
+## Table des Matières
+1. [Introduction](#introduction)
+2. [Prérequis](#prérequis)
+3. [Authentification](#authentification)
+4. [Modes de Paiement](#modes-de-paiement)
+5. [Implémentation HTML Checkout](#implémentation-html-checkout)
+6. [Implémentation JavaScript Inline](#implémentation-javascript-inline)
+7. [Vérification des Transactions](#vérification-des-transactions)
+8. [Gestion des Webhooks](#gestion-des-webhooks)
+9. [Cartes de Test](#cartes-de-test)
+10. [Sécurité et Bonnes Pratiques](#sécurité-et-bonnes-pratiques)
+
+---
+
+## Introduction
+
+Flutterwave est une plateforme de paiement qui permet de collecter des paiements de manière sécurisée via plusieurs méthodes (cartes bancaires, transferts bancaires, mobile money, etc.). L'API offre plusieurs options d'intégration adaptées à vos besoins.
+
+**URL de Base de l'API**: `https://api.flutterwave.com/v3/`
+
+---
+
+## Prérequis
+
+### 1. Créer un Compte Flutterwave
+- Inscrivez-vous sur [Flutterwave](https://onboarding.flutterwave.com/signup)
+- Vérifiez votre email et complétez votre profil
+
+### 2. Obtenir vos Clés API
+Vous recevrez **3 types de clés** :
+
+- **Secret Key** : Accès complet à votre compte (côté serveur uniquement)
+- **Public Key** : Pour les intégrations côté client (JavaScript)
+- **Encryption Key** : Pour chiffrer les données sensibles (paiements par carte directe)
+
+#### Comment Récupérer vos Clés ?
+1. Connectez-vous à votre [Dashboard Flutterwave](https://app.flutterwave.com/login)
+2. Allez dans **Settings** → **API Keys** (section DEVELOPERS)
+3. Copiez vos clés
+
+**⚠️ Important** : Les clés de test ont le préfixe `_TEST` (ex: `FLWPUBK_TEST-xxxxx`)
+
+---
+
+## Authentification
+
+### Modes d'Opération
+
+#### 1. Mode Test
+- Pas d'argent réel
+- Utiliser les cartes et comptes de test
+- Idéal pour développer et tester votre intégration
+- Toggle: Activer le mode Test dans votre dashboard
+
+#### 2. Mode Live (Production)
+- Transactions réelles avec de l'argent réel
+- À utiliser uniquement après avoir testé en mode Test
+- Clés masquées pour plus de sécurité
+
+### Autorisation des Appels API
+
+Toutes les requêtes API doivent inclure votre **Secret Key** dans le header `Authorization` :
+
+```http
+Authorization: Bearer YOUR_SECRET_KEY
+```
+
+#### Exemple avec Node.js
+
+```javascript
+const response = await fetch("https://api.flutterwave.com/v3/payments", {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    // Votre payload
+  })
+});
+```
+
+#### Exemple avec SDK Node.js
+
+```javascript
+// Installation : npm install flutterwave-node-v3
+const Flutterwave = require('flutterwave-node-v3');
+
+const flw = new Flutterwave(
+  process.env.FLW_PUBLIC_KEY,
+  process.env.FLW_SECRET_KEY
+);
+
+// Les appels suivants incluront automatiquement le header
+```
+
+### 🔐 Sécurité des Clés
+- **JAMAIS** exposer votre Secret Key dans le code frontend
+- Stocker les clés comme variables d'environnement
+- Ne pas les commiter sur Git
+- Si compromises, générer de nouvelles clés immédiatement
+
+---
+
+## Modes de Paiement
+
+Flutterwave supporte plusieurs méthodes de paiement :
+
+- **card** : Cartes bancaires (Visa, Mastercard, etc.)
+- **bank_transfer** : Virements bancaires
+- **ussd** : Paiements USSD
+- **mobile_money** : Mobile Money (MTN, Airtel, etc.)
+- **qr** : QR Code (Nigeria uniquement)
+- **mpesa** : M-Pesa (Kenya, Tanzanie)
+- **banktransfer** : Transfert bancaire direct
+
+---
+
+## Implémentation HTML Checkout
+
+### Méthode Simple (Redirection vers Page de Paiement)
+
+Le HTML Checkout redirige vos utilisateurs vers une page de paiement hébergée par Flutterwave.
+
+#### Code HTML Complet
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Paiement Flutterwave</title>
+</head>
+<body>
+    <h1>Finaliser votre commande</h1>
+    
+    <form method="POST" action="https://checkout.flutterwave.com/v3/hosted/pay">
+        <!-- Clé publique -->
+        <input type="hidden" name="public_key" value="FLWPUBK_TEST-XXXXXXXXXXXXXXXXXX-X" />
+        
+        <!-- Référence unique de transaction -->
+        <input type="hidden" name="tx_ref" value="<?php echo uniqid('tx-'); ?>" />
+        
+        <!-- Montant -->
+        <input type="hidden" name="amount" value="5000" />
+        
+        <!-- Devise -->
+        <input type="hidden" name="currency" value="XAF" />
+        
+        <!-- Méthodes de paiement acceptées -->
+        <input type="hidden" name="payment_options" value="card,mobilemoneyghana,ussd" />
+        
+        <!-- URL de redirection après paiement -->
+        <input type="hidden" name="redirect_url" value="https://votresite.com/payment-callback" />
+        
+        <!-- Informations client -->
+        <input type="hidden" name="customer[email]" value="client@example.com" />
+        <input type="hidden" name="customer[name]" value="John Doe" />
+        <input type="hidden" name="customer[phonenumber]" value="237690000000" />
+        
+        <!-- Métadonnées personnalisées -->
+        <input type="hidden" name="meta[order_id]" value="12345" />
+        <input type="hidden" name="meta[product_name]" value="Produit XYZ" />
+        
+        <!-- Configuration optionnelle -->
+        <!-- Durée de session en minutes (max: 1440) -->
+        <input type="hidden" name="configurations[session_duration]" value="30" />
+        
+        <!-- Nombre maximum de tentatives -->
+        <input type="hidden" name="configurations[max_retry_attempt]" value="3" />
+        
+        <!-- Titre personnalisé -->
+        <input type="hidden" name="customizations[title]" value="Ma Boutique" />
+        <input type="hidden" name="customizations[description]" value="Paiement pour commande #12345" />
+        <input type="hidden" name="customizations[logo]" value="https://votresite.com/logo.png" />
+        
+        <!-- Bouton de paiement -->
+        <button type="submit" style="padding: 15px 30px; background: #f5a623; color: white; border: none; cursor: pointer; font-size: 16px;">
+            Payer Maintenant
+        </button>
+    </form>
+</body>
+</html>
+```
+
+### Devises Supportées (Afrique)
+
+- **XAF** : Franc CFA (Cameroun, etc.)
+- **NGN** : Naira Nigérian
+- **GHS** : Cedi Ghanéen
+- **KES** : Shilling Kenyan
+- **ZAR** : Rand Sud-Africain
+- **UGX** : Shilling Ougandais
+- **TZS** : Shilling Tanzanien
+- **USD**, **EUR**, **GBP** (international)
+
+---
+
+## Implémentation JavaScript Inline
+
+### Méthode Avancée (Modal de Paiement)
+
+L'intégration Inline affiche un modal de paiement directement sur votre site sans redirection.
+
+#### Code HTML + JavaScript
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Paiement Inline Flutterwave</title>
+    <!-- Charger le SDK Flutterwave -->
+    <script src="https://checkout.flutterwave.com/v3.js"></script>
+</head>
+<body>
+    <h1>Payer avec Flutterwave Inline</h1>
+    <button onclick="makePayment()" style="padding: 15px 30px; background: #f5a623; color: white; border: none; cursor: pointer;">
+        Payer 5000 XAF
+    </button>
+
+    <script>
+        function makePayment() {
+            FlutterwaveCheckout({
+                public_key: "FLWPUBK_TEST-XXXXXXXXXXXXXXXXXX-X",
+                tx_ref: "tx-" + Date.now(),
+                amount: 5000,
+                currency: "XAF",
+                payment_options: "card,mobilemoney,ussd",
+                
+                // Informations client
+                customer: {
+                    email: "client@example.com",
+                    phone_number: "237690000000",
+                    name: "John Doe",
+                },
+                
+                // Personnalisation
+                customizations: {
+                    title: "Ma Boutique",
+                    description: "Paiement pour votre commande",
+                    logo: "https://votresite.com/logo.png",
+                },
+                
+                // Métadonnées
+                meta: {
+                    order_id: "12345",
+                    product_name: "Produit XYZ"
+                },
+                
+                // Callback après paiement
+                callback: function (data) {
+                    console.log("Paiement terminé:", data);
+                    
+                    if (data.status === "successful") {
+                        // Vérifier la transaction côté serveur
+                        verifyTransaction(data.transaction_id);
+                    } else {
+                        alert("Paiement échoué ou annulé");
+                    }
+                },
+                
+                // Callback en cas de fermeture du modal
+                onclose: function() {
+                    console.log("Modal de paiement fermé");
+                }
+            });
+        }
+        
+        // Fonction pour vérifier la transaction (appel API côté serveur)
+        function verifyTransaction(transactionId) {
+            fetch('/api/verify-payment', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ transaction_id: transactionId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.verified) {
+                    alert("Paiement confirmé !");
+                    // Rediriger vers page de succès
+                    window.location.href = "/success";
+                } else {
+                    alert("Erreur de vérification du paiement");
+                }
+            })
+            .catch(error => {
+                console.error("Erreur:", error);
+            });
+        }
+    </script>
+</body>
+</html>
+```
+
+---
+
+## Vérification des Transactions
+
+**⚠️ CRITIQUE** : Toujours vérifier les transactions côté serveur avec votre Secret Key.
+
+### Après le Paiement
+
+Flutterwave redirige vers votre `redirect_url` avec ces paramètres :
+
+- `status` : "successful" ou "cancelled"
+- `tx_ref` : Votre référence de transaction
+- `transaction_id` : ID Flutterwave (si succès)
+
+### Endpoint de Vérification
+
+**URL** : `GET https://api.flutterwave.com/v3/transactions/{transaction_id}/verify`
+
+#### Exemple Node.js (Express)
+
+```javascript
+const express = require('express');
+const axios = require('axios');
+const app = express();
+
+app.get('/payment-callback', async (req, res) => {
+    const { status, tx_ref, transaction_id } = req.query;
+    
+    if (status === 'successful') {
+        try {
+            // Vérifier la transaction
+            const response = await axios.get(
+                `https://api.flutterwave.com/v3/transactions/${transaction_id}/verify`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`
+                    }
+                }
+            );
+            
+            const transaction = response.data.data;
+            
+            // Récupérer les détails de la commande depuis votre DB
+            const orderDetails = await getOrderByTxRef(tx_ref);
+            
+            // Vérifications de sécurité
+            if (
+                transaction.status === "successful" &&
+                transaction.amount === orderDetails.amount &&
+                transaction.currency === orderDetails.currency
+            ) {
+                // Succès ! Marquer la commande comme payée
+                await markOrderAsPaid(orderDetails.id);
+                
+                res.redirect('/success?order=' + orderDetails.id);
+            } else {
+                // Montant ou devise incorrect
+                res.redirect('/payment-failed');
+            }
+            
+        } catch (error) {
+            console.error('Erreur de vérification:', error);
+            res.redirect('/payment-error');
+        }
+    } else {
+        // Paiement annulé
+        res.redirect('/payment-cancelled');
+    }
+});
+
+app.listen(3000);
+```
+
+#### Exemple avec SDK Node.js
+
+```javascript
+const Flutterwave = require('flutterwave-node-v3');
+const flw = new Flutterwave(
+    process.env.FLW_PUBLIC_KEY,
+    process.env.FLW_SECRET_KEY
+);
+
+app.get('/payment-callback', async (req, res) => {
+    if (req.query.status === 'successful') {
+        const response = await flw.Transaction.verify({
+            id: req.query.transaction_id
+        });
+        
+        if (response.data.status === 'successful') {
+            // Traiter le paiement
+        }
+    }
+});
+```
+
+### Réponse de Vérification (JSON)
+
+```json
+{
+  "status": "success",
+  "message": "Transaction fetched successfully",
+  "data": {
+    "id": 2556677,
+    "tx_ref": "tx-019203",
+    "flw_ref": "FLW-MOCK-4d8805e5b7b01c07e66f8f8b",
+    "device_fingerprint": "N/A",
+    "amount": 5000,
+    "currency": "XAF",
+    "charged_amount": 5000,
+    "app_fee": 70,
+    "merchant_fee": 0,
+    "processor_response": "Approved",
+    "auth_model": "PIN",
+    "ip": "197.149.95.62",
+    "narration": "CARD Transaction ",
+    "status": "successful",
+    "payment_type": "card",
+    "created_at": "2023-08-01T10:30:00.000Z",
+    "account_id": 12345,
+    "customer": {
+      "id": 789012,
+      "name": "John Doe",
+      "phone_number": "237690000000",
+      "email": "client@example.com",
+      "created_at": "2023-08-01T10:25:00.000Z"
+    },
+    "card": {
+      "first_6digits": "418742",
+      "last_4digits": "4246",
+      "issuer": "MASTERCARD",
+      "country": "NG",
+      "type": "DEBIT",
+      "expiry": "09/32"
+    }
+  }
+}
+```
+
+---
+
+## Gestion des Webhooks
+
+Les webhooks notifient votre serveur automatiquement après chaque transaction.
+
+### Configuration des Webhooks
+
+1. Allez dans **Settings** → **Webhooks** dans votre dashboard
+2. Ajoutez votre URL de webhook : `https://votresite.com/webhooks/flutterwave`
+3. Copiez votre **Secret Hash** (pour vérifier l'authenticité)
+
+### Événements Disponibles
+
+- `charge.completed` : Paiement réussi
+- `transfer.completed` : Transfert terminé
+- `refund.created` : Remboursement créé
+
+### Exemple de Réception de Webhook (Node.js)
+
+```javascript
+const crypto = require('crypto');
+const express = require('express');
+const app = express();
+
+app.use(express.json());
+
+app.post('/webhooks/flutterwave', (req, res) => {
+    const secretHash = process.env.FLW_SECRET_HASH;
+    const signature = req.headers["verif-hash"];
+    
+    // Vérifier l'authenticité du webhook
+    if (!signature || (signature !== secretHash)) {
+        return res.status(401).send('Unauthorized');
+    }
+    
+    const payload = req.body;
+    
+    // Traiter l'événement
+    if (payload.event === 'charge.completed') {
+        const transaction = payload.data;
+        
+        if (transaction.status === 'successful') {
+            // Mettre à jour votre base de données
+            console.log('Paiement réussi:', transaction.tx_ref);
+            
+            // Envoyer confirmation au client, etc.
+        }
+    }
+    
+    res.status(200).send('OK');
+});
+
+app.listen(3000);
+```
+
+### Format du Webhook
+
+```json
+{
+  "event": "charge.completed",
+  "data": {
+    "id": 2556677,
+    "tx_ref": "tx-019203",
+    "flw_ref": "FLW-MOCK-4d8805e5b7b01c07e66f8f8b",
+    "amount": 5000,
+    "currency": "XAF",
+    "charged_amount": 5000,
+    "status": "successful",
+    "payment_type": "card",
+    "customer": {
+      "id": 789012,
+      "name": "John Doe",
+      "email": "client@example.com"
+    },
+    "created_at": "2023-08-01T10:30:00.000Z"
+  }
+}
+```
+
+---
+
+## Cartes de Test
+
+### Carte de Test Universelle
+
+- **Numéro** : `4187427415564246`
+- **CVV** : `828`
+- **Expiration** : `09/32`
+- **PIN** : `3310`
+- **OTP** : `12345`
+
+### Autres Cartes de Test
+
+#### Carte Mastercard
+- **Numéro** : `5531886652142950`
+- **CVV** : `564`
+- **Expiration** : `09/32`
+- **PIN** : `3310`
+
+#### Carte Visa (3D Secure)
+- **Numéro** : `4556052704172643`
+- **CVV** : `899`
+- **Expiration** : `09/32`
+
+### Comptes Bancaires de Test (Nigeria)
+
+- **Banque** : Zenith Bank
+- **Numéro de compte** : `0690000031`
+- **OTP** : `12345`
+
+---
+
+## Sécurité et Bonnes Pratiques
+
+### ✅ À Faire
+
+1. **Toujours vérifier les transactions côté serveur**
+   - Ne jamais faire confiance uniquement au callback frontend
+   
+2. **Stocker les clés en toute sécurité**
+   ```bash
+   # Fichier .env
+   FLW_PUBLIC_KEY=FLWPUBK_TEST-xxxxx
+   FLW_SECRET_KEY=FLWSECK_TEST-xxxxx
+   FLW_ENCRYPTION_KEY=FLWSECK_TEST-xxxxx
+   FLW_SECRET_HASH=your-webhook-secret
+   ```
+
+3. **Générer des références uniques**
+   ```javascript
+   const tx_ref = `tx-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+   ```
+
+4. **Valider les montants**
+   - Vérifier que le montant payé correspond au montant attendu
+   - Vérifier la devise
+
+5. **Gérer les erreurs gracieusement**
+   - Afficher des messages clairs aux utilisateurs
+   - Logger les erreurs pour le débogage
+
+6. **Utiliser HTTPS**
+   - Toutes les communications doivent être chiffrées
+
+7. **Implémenter les webhooks**
+   - Pour être notifié même si l'utilisateur ferme la page
+
+### ❌ À Éviter
+
+1. **Ne jamais exposer la Secret Key publiquement**
+   - Pas dans le code frontend
+   - Pas dans le contrôle de version (Git)
+
+2. **Ne pas faire confiance uniquement au client**
+   - Toujours vérifier côté serveur
+
+3. **Ne pas ignorer les webhooks**
+   - C'est la méthode la plus fiable
+
+4. **Ne pas utiliser le mode Live sans tests**
+   - Toujours tester en mode Test d'abord
+
+---
+
+## Flux Complet de Paiement
+
+```
+┌─────────────┐
+│   Client    │
+│  (Browser)  │
+└──────┬──────┘
+       │
+       │ 1. Clique sur "Payer"
+       ▼
+┌─────────────────────────┐
+│  Votre Site Web         │
+│  (Frontend)             │
+└──────┬──────────────────┘
+       │
+       │ 2. Affiche modal/redirige
+       ▼
+┌─────────────────────────┐
+│  Flutterwave Checkout   │
+│  (Page de paiement)     │
+└──────┬──────────────────┘
+       │
+       │ 3. Client entre infos + paie
+       ▼
+┌─────────────────────────┐
+│  Banque                 │
+│  (Traitement)           │
+└──────┬──────────────────┘
+       │
+       │ 4. Confirmation
+       ▼
+┌─────────────────────────┐
+│  Flutterwave            │
+└──────┬──────────────────┘
+       │
+       ├─ 5a. Redirect vers votre site
+       │
+       └─ 5b. Envoie webhook
+       │
+       ▼
+┌─────────────────────────┐
+│  Votre Serveur          │
+│  (Backend)              │
+└──────┬──────────────────┘
+       │
+       │ 6. Vérifie la transaction
+       ▼
+┌─────────────────────────┐
+│  Flutterwave API        │
+│  /verify                │
+└──────┬──────────────────┘
+       │
+       │ 7. Confirmation finale
+       ▼
+┌─────────────────────────┐
+│  Votre Base de Données  │
+│  (Marquer comme payé)   │
+└─────────────────────────┘
+       │
+       │ 8. Affiche succès
+       ▼
+┌─────────────┐
+│   Client    │
+│  (Heureux!) │
+└─────────────┘
+```
+
+---
+
+## Exemple Complet : Application Node.js + Express
+
+### Structure du Projet
+
+```
+mon-app/
+├── .env
+├── package.json
+├── server.js
+├── public/
+│   └── checkout.html
+└── routes/
+    └── payments.js
+```
+
+### Fichier .env
+
+```env
+FLW_PUBLIC_KEY=FLWPUBK_TEST-xxxxx
+FLW_SECRET_KEY=FLWSECK_TEST-xxxxx
+FLW_SECRET_HASH=your-webhook-secret
+PORT=3000
+```
+
+### server.js
+
+```javascript
+require('dotenv').config();
+const express = require('express');
+const paymentRoutes = require('./routes/payments');
+
+const app = express();
+
+app.use(express.json());
+app.use(express.static('public'));
+app.use('/api', paymentRoutes);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Serveur lancé sur le port ${PORT}`);
+});
+```
+
+### routes/payments.js
+
+```javascript
+const express = require('express');
+const axios = require('axios');
+const router = express.Router();
+
+// Vérifier un paiement
+router.post('/verify-payment', async (req, res) => {
+    const { transaction_id } = req.body;
+    
+    try {
+        const response = await axios.get(
+            `https://api.flutterwave.com/v3/transactions/${transaction_id}/verify`,
+            {
+                headers: {
+                    'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`
+                }
+            }
+        );
+        
+        const transaction = response.data.data;
+        
+        if (transaction.status === 'successful') {
+            // TODO: Sauvegarder dans votre DB
+            
+            res.json({
+                verified: true,
+                message: 'Paiement vérifié avec succès',
+                data: transaction
+            });
+        } else {
+            res.json({
+                verified: false,
+                message: 'Paiement non réussi'
+            });
+        }
+        
+    } catch (error) {
+        console.error('Erreur de vérification:', error);
+        res.status(500).json({
+            verified: false,
+            message: 'Erreur lors de la vérification'
+        });
+    }
+});
+
+// Recevoir les webhooks
+router.post('/webhooks/flutterwave', (req, res) => {
+    const signature = req.headers['verif-hash'];
+    
+    if (signature !== process.env.FLW_SECRET_HASH) {
+        return res.status(401).send('Unauthorized');
+    }
+    
+    const payload = req.body;
+    
+    if (payload.event === 'charge.completed') {
+        const transaction = payload.data;
+        
+        if (transaction.status === 'successful') {
+            console.log('Webhook reçu - Paiement réussi:', transaction.tx_ref);
+            // TODO: Mettre à jour votre DB
+        }
+    }
+    
+    res.status(200).send('OK');
+});
+
+// Callback après paiement
+router.get('/payment-callback', async (req, res) => {
+    const { status, tx_ref, transaction_id } = req.query;
+    
+    if (status === 'successful') {
+        // Vérifier la transaction
+        // Puis rediriger vers page de succès
+        res.redirect(`/success.html?ref=${tx_ref}`);
+    } else {
+        res.redirect('/cancelled.html');
+    }
+});
+
+module.exports = router;
+```
+
+### public/checkout.html
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Checkout</title>
+    <script src="https://checkout.flutterwave.com/v3.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            background: #f5a623;
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #e09612;
+        }
+    </style>
+</head>
+<body>
+    <h1>Finaliser votre commande</h1>
+    <p>Montant à payer : <strong>5000 XAF</strong></p>
+    <button onclick="makePayment()">Payer Maintenant</button>
+
+    <script>
+        function makePayment() {
+            FlutterwaveCheckout({
+                public_key: "FLWPUBK_TEST-XXXXXXXXXXXXXXXXXX-X", // Remplacer par votre clé
+                tx_ref: "tx-" + Date.now(),
+                amount: 5000,
+                currency: "XAF",
+                payment_options: "card,mobilemoney,ussd",
+                
+                customer: {
+                    email: "client@example.com",
+                    phone_number: "237690000000",
+                    name: "John Doe",
+                },
+                
+                customizations: {
+                    title: "Ma Boutique",
+                    description: "Paiement pour votre commande",
+                    logo: "https://votresite.com/logo.png",
+                },
+                
+                callback: function (data) {
+                    if (data.status === "successful") {
+                        verifyTransaction(data.transaction_id);
+                    } else {
+                        alert("Paiement échoué ou annulé");
+                    }
+                },
+                
+                onclose: function() {
+                    console.log("Modal fermé");
+                }
+            });
+        }
+        
+        function verifyTransaction(transactionId) {
+            fetch('/api/verify-payment', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ transaction_id: transactionId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.verified) {
+                    window.location.href = "/success.html";
+                } else {
+                    alert("Erreur de vérification du paiement");
+                }
+            })
+            .catch(error => {
+                console.error("Erreur:", error);
+            });
+        }
+    </script>
+</body>
+</html>
+```
+
+---
+
+## APIs Avancées
+
+### 1. Créer un Lien de Paiement
+
+Créez un lien de paiement réutilisable ou à usage unique.
+
+**Endpoint** : `POST https://api.flutterwave.com/v3/payment-links`
+
+```javascript
+const axios = require('axios');
+
+async function createPaymentLink() {
+    const response = await axios.post(
+        'https://api.flutterwave.com/v3/payment-links',
+        {
+            tx_ref: "unique-link-ref-" + Date.now(),
+            amount: 5000,
+            currency: "XAF",
+            payment_options: "card,mobilemoney",
+            customer: {
+                email: "client@example.com",
+                name: "John Doe"
+            },
+            customizations: {
+                title: "Ma Boutique",
+                description: "Paiement produit XYZ"
+            },
+            redirect_url: "https://votresite.com/payment-callback"
+        },
+        {
+            headers: {
+                'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        }
+    );
+    
+    console.log('Lien de paiement:', response.data.data.link);
+    return response.data.data.link;
+}
+```
+
+**Réponse** :
+```json
+{
+  "status": "success",
+  "message": "Payment link created",
+  "data": {
+    "link": "https://checkout.flutterwave.com/v3/hosted/pay/abc123xyz",
+    "amount": 5000,
+    "currency": "XAF",
+    "tx_ref": "unique-link-ref-1234567890"
+  }
+}
+```
+
+### 2. Initier un Transfert (Payout)
+
+Envoyez de l'argent directement sur un compte bancaire.
+
+**Endpoint** : `POST https://api.flutterwave.com/v3/transfers`
+
+```javascript
+async function initiateTransfer() {
+    const response = await axios.post(
+        'https://api.flutterwave.com/v3/transfers',
+        {
+            account_bank: "044", // Code banque (ex: Access Bank)
+            account_number: "0690000032",
+            amount: 5000,
+            currency: "NGN",
+            narration: "Paiement commission",
+            reference: "transfer-" + Date.now(),
+            callback_url: "https://votresite.com/transfer-callback",
+            debit_currency: "NGN"
+        },
+        {
+            headers: {
+                'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        }
+    );
+    
+    return response.data;
+}
+```
+
+### 3. Vérifier un Compte Bancaire
+
+Validez les informations bancaires avant de faire un transfert.
+
+**Endpoint** : `POST https://api.flutterwave.com/v3/accounts/resolve`
+
+```javascript
+async function verifyBankAccount(accountNumber, bankCode) {
+    const response = await axios.post(
+        'https://api.flutterwave.com/v3/accounts/resolve',
+        {
+            account_number: accountNumber,
+            account_bank: bankCode
+        },
+        {
+            headers: {
+                'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        }
+    );
+    
+    return response.data.data; // Retourne le nom du titulaire
+}
+
+// Utilisation
+const accountInfo = await verifyBankAccount("0690000032", "044");
+console.log("Titulaire:", accountInfo.account_name);
+```
+
+### 4. Obtenir la Liste des Banques
+
+Récupérez toutes les banques disponibles pour un pays.
+
+**Endpoint** : `GET https://api.flutterwave.com/v3/banks/{country_code}`
+
+```javascript
+async function getBanks(country = "NG") {
+    const response = await axios.get(
+        `https://api.flutterwave.com/v3/banks/${country}`,
+        {
+            headers: {
+                'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`
+            }
+        }
+    );
+    
+    return response.data.data;
+}
+
+// Utilisation
+const banks = await getBanks("NG"); // Nigeria
+const cameroonBanks = await getBanks("CM"); // Cameroun
+```
+
+**Codes Pays** :
+- `NG` : Nigeria
+- `GH` : Ghana
+- `KE` : Kenya
+- `UG` : Uganda
+- `ZA` : Afrique du Sud
+- `TZ` : Tanzanie
+- `CM` : Cameroun
+
+### 5. Créer un Sous-compte (Split Payment)
+
+Partagez automatiquement les paiements avec plusieurs bénéficiaires.
+
+**Endpoint** : `POST https://api.flutterwave.com/v3/subaccounts`
+
+```javascript
+async function createSubAccount() {
+    const response = await axios.post(
+        'https://api.flutterwave.com/v3/subaccounts',
+        {
+            account_bank: "044",
+            account_number: "0690000032",
+            business_name: "Vendeur Partenaire",
+            business_email: "vendeur@example.com",
+            business_contact: "John Doe",
+            business_contact_mobile: "237690000000",
+            business_mobile: "237690000000",
+            country: "NG",
+            split_type: "percentage", // ou "flat"
+            split_value: 0.15 // 15% ou montant fixe
+        },
+        {
+            headers: {
+                'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        }
+    );
+    
+    return response.data.data.subaccount_id;
+}
+
+// Utiliser le sous-compte dans un paiement
+function makePaymentWithSplit(subaccountId) {
+    FlutterwaveCheckout({
+        public_key: "FLWPUBK_TEST-xxxxx",
+        tx_ref: "tx-" + Date.now(),
+        amount: 10000,
+        currency: "NGN",
+        subaccounts: [
+            {
+                id: subaccountId,
+                transaction_split_ratio: 15 // 15% va au vendeur
+            }
+        ],
+        // ... autres paramètres
+    });
+}
+```
+
+### 6. Créer un Plan d'Abonnement
+
+Pour les paiements récurrents.
+
+**Endpoint** : `POST https://api.flutterwave.com/v3/payment-plans`
+
+```javascript
+async function createSubscriptionPlan() {
+    const response = await axios.post(
+        'https://api.flutterwave.com/v3/payment-plans',
+        {
+            amount: 5000,
+            name: "Abonnement Mensuel Premium",
+            interval: "monthly", // daily, weekly, monthly, yearly
+            duration: 12, // Nombre de fois à facturer
+            currency: "XAF"
+        },
+        {
+            headers: {
+                'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        }
+    );
+    
+    return response.data.data.id; // Plan ID
+}
+
+// Utiliser le plan dans un paiement
+function subscribeCustomer(planId) {
+    FlutterwaveCheckout({
+        public_key: "FLWPUBK_TEST-xxxxx",
+        tx_ref: "tx-" + Date.now(),
+        amount: 5000,
+        currency: "XAF",
+        payment_plan: planId,
+        customer: {
+            email: "client@example.com",
+            name: "John Doe"
+        }
+    });
+}
+```
+
+### 7. Obtenir l'Historique des Transactions
+
+**Endpoint** : `GET https://api.flutterwave.com/v3/transactions`
+
+```javascript
+async function getTransactions(page = 1, from, to) {
+    const params = new URLSearchParams({
+        page: page,
+        from: from || '2024-01-01',
+        to: to || new Date().toISOString().split('T')[0]
+    });
+    
+    const response = await axios.get(
+        `https://api.flutterwave.com/v3/transactions?${params}`,
+        {
+            headers: {
+                'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`
+            }
+        }
+    );
+    
+    return response.data.data;
+}
+
+// Obtenir une transaction spécifique par tx_ref
+async function getTransactionByRef(txRef) {
+    const response = await axios.get(
+        `https://api.flutterwave.com/v3/transactions?tx_ref=${txRef}`,
+        {
+            headers: {
+                'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`
+            }
+        }
+    );
+    
+    return response.data.data[0];
+}
+```
+
+### 8. Rembourser une Transaction
+
+**Endpoint** : `POST https://api.flutterwave.com/v3/transactions/{transaction_id}/refund`
+
+```javascript
+async function refundTransaction(transactionId, amount) {
+    const response = await axios.post(
+        `https://api.flutterwave.com/v3/transactions/${transactionId}/refund`,
+        {
+            amount: amount // Optionnel : remboursement partiel
+        },
+        {
+            headers: {
+                'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        }
+    );
+    
+    return response.data;
+}
+```
+
+---
+
+## Gestion des Erreurs
+
+### Codes d'Erreur Courants
+
+| Code | Message | Solution |
+|------|---------|----------|
+| 401 | Unauthorized | Vérifier votre Secret Key |
+| 400 | Bad Request | Vérifier le format de votre requête |
+| 404 | Not Found | L'endpoint ou la ressource n'existe pas |
+| 429 | Too Many Requests | Rate limit atteint, réessayer plus tard |
+| 500 | Internal Server Error | Erreur côté Flutterwave, contacter le support |
+
+### Exemple de Gestion d'Erreurs
+
+```javascript
+async function makePaymentRequest(payload) {
+    try {
+        const response = await axios.post(
+            'https://api.flutterwave.com/v3/payments',
+            payload,
+            {
+                headers: {
+                    'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+        
+        return {
+            success: true,
+            data: response.data
+        };
+        
+    } catch (error) {
+        if (error.response) {
+            // Erreur de réponse du serveur
+            console.error('Erreur API:', error.response.status);
+            console.error('Message:', error.response.data.message);
+            
+            return {
+                success: false,
+                error: error.response.data.message,
+                code: error.response.status
+            };
+        } else if (error.request) {
+            // Pas de réponse reçue
+            console.error('Pas de réponse du serveur');
+            return {
+                success: false,
+                error: 'Impossible de contacter le serveur'
+            };
+        } else {
+            // Erreur lors de la configuration
+            console.error('Erreur:', error.message);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+}
+```
+
+---
+
+## Testing et Debugging
+
+### 1. Mode Test vs Mode Live
+
+```javascript
+// Déterminer le mode basé sur l'environnement
+const isProduction = process.env.NODE_ENV === 'production';
+
+const publicKey = isProduction 
+    ? process.env.FLW_PUBLIC_KEY_LIVE 
+    : process.env.FLW_PUBLIC_KEY_TEST;
+
+const secretKey = isProduction 
+    ? process.env.FLW_SECRET_KEY_LIVE 
+    : process.env.FLW_SECRET_KEY_TEST;
+```
+
+### 2. Logger les Transactions
+
+```javascript
+const winston = require('winston');
+
+const logger = winston.createLogger({
+    level: 'info',
+    format: winston.format.json(),
+    transports: [
+        new winston.transports.File({ filename: 'error.log', level: 'error' }),
+        new winston.transports.File({ filename: 'transactions.log' })
+    ]
+});
+
+// Utilisation
+logger.info('Transaction initiée', {
+    tx_ref: txRef,
+    amount: amount,
+    customer: customerEmail
+});
+
+logger.error('Échec de vérification', {
+    transaction_id: transactionId,
+    error: error.message
+});
+```
+
+### 3. Tester les Webhooks Localement
+
+Utilisez [ngrok](https://ngrok.com/) pour exposer votre serveur local :
+
+```bash
+# Installer ngrok
+npm install -g ngrok
+
+# Exposer votre serveur local
+ngrok http 3000
+
+# Copier l'URL HTTPS générée (ex: https://abc123.ngrok.io)
+# L'ajouter dans Settings > Webhooks sur Flutterwave
+```
+
+### 4. Simuler des Scénarios de Test
+
+```javascript
+// Tester un paiement réussi
+function testSuccessfulPayment() {
+    return {
+        tx_ref: "test-success-" + Date.now(),
+        amount: 5000,
+        currency: "XAF",
+        customer: {
+            email: "test@example.com",
+            name: "Test User"
+        }
+    };
+}
+
+// Tester un paiement échoué (carte insuffisante)
+function testFailedPayment() {
+    // Utiliser une carte de test spécifique qui échoue
+    return {
+        tx_ref: "test-failed-" + Date.now(),
+        amount: 5000,
+        currency: "XAF"
+        // La carte de test échouera automatiquement
+    };
+}
+```
+
+---
+
+## Optimisation des Performances
+
+### 1. Mise en Cache des Banques
+
+```javascript
+const NodeCache = require('node-cache');
+const cache = new NodeCache({ stdTTL: 86400 }); // 24 heures
+
+async function getBanksWithCache(country = "NG") {
+    const cacheKey = `banks_${country}`;
+    
+    // Vérifier le cache
+    const cachedBanks = cache.get(cacheKey);
+    if (cachedBanks) {
+        return cachedBanks;
+    }
+    
+    // Sinon, récupérer depuis l'API
+    const banks = await getBanks(country);
+    
+    // Mettre en cache
+    cache.set(cacheKey, banks);
+    
+    return banks;
+}
+```
+
+### 2. Rate Limiting
+
+```javascript
+const rateLimit = require('express-rate-limit');
+
+const paymentLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // Max 10 requêtes par IP
+    message: 'Trop de tentatives de paiement, réessayez plus tard'
+});
+
+app.post('/api/initiate-payment', paymentLimiter, async (req, res) => {
+    // Traiter le paiement
+});
+```
+
+### 3. Queue pour les Webhooks
+
+```javascript
+const Queue = require('bull');
+const webhookQueue = new Queue('webhook-processing');
+
+// Ajouter à la queue
+app.post('/webhooks/flutterwave', (req, res) => {
+    const signature = req.headers['verif-hash'];
+    
+    if (signature === process.env.FLW_SECRET_HASH) {
+        // Ajouter à la queue pour traitement asynchrone
+        webhookQueue.add(req.body);
+        res.status(200).send('OK');
+    } else {
+        res.status(401).send('Unauthorized');
+    }
+});
+
+// Traiter la queue
+webhookQueue.process(async (job) => {
+    const payload = job.data;
+    
+    if (payload.event === 'charge.completed') {
+        // Traiter le paiement
+        await processPayment(payload.data);
+    }
+});
+```
+
+---
+
+## Conformité et Réglementation
+
+### 1. PCI-DSS Compliance
+
+Flutterwave est certifié PCI-DSS Level 1. Vous n'avez **pas besoin** de gérer les données de carte vous-même.
+
+**Bonnes pratiques** :
+- Ne jamais stocker les numéros de carte
+- Ne jamais logger les CVV ou PINs
+- Utiliser Flutterwave Inline ou Standard pour la collecte
+
+### 2. RGPD / GDPR
+
+```javascript
+// Anonymiser les données après un certain délai
+async function anonymizeOldTransactions() {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    
+    await Transaction.updateMany(
+        { created_at: { $lt: sixMonthsAgo } },
+        {
+            $set: {
+                'customer.email': 'anonymized@example.com',
+                'customer.name': 'Anonymized User',
+                'customer.phone': 'XXXXXXXXXX'
+            }
+        }
+    );
+}
+```
+
+### 3. Audit Trail
+
+```javascript
+// Logger toutes les actions importantes
+function auditLog(action, userId, details) {
+    const logEntry = {
+        timestamp: new Date(),
+        action: action,
+        userId: userId,
+        details: details,
+        ip: req.ip
+    };
+    
+    // Sauvegarder dans une collection séparée
+    AuditLog.create(logEntry);
+}
+
+// Utilisation
+auditLog('PAYMENT_INITIATED', userId, { amount: 5000, tx_ref: txRef });
+auditLog('PAYMENT_VERIFIED', userId, { transaction_id: transactionId });
+```
+
+---
+
+## Checklist de Mise en Production
+
+### Avant le Lancement
+
+- [ ] Tester tous les flux de paiement en mode Test
+- [ ] Vérifier la vérification des transactions côté serveur
+- [ ] Implémenter et tester les webhooks
+- [ ] Configurer les variables d'environnement de production
+- [ ] Sécuriser les clés API (ne pas les exposer)
+- [ ] Activer HTTPS sur votre site
+- [ ] Tester sur différents navigateurs et appareils
+- [ ] Vérifier la gestion des erreurs
+- [ ] Implémenter le logging
+- [ ] Configurer les notifications par email
+- [ ] Tester les remboursements
+- [ ] Vérifier la conformité RGPD
+- [ ] Documenter le processus pour votre équipe
+
+### Après le Lancement
+
+- [ ] Monitorer les transactions quotidiennement
+- [ ] Vérifier les webhooks reçus
+- [ ] Surveiller les taux d'échec
+- [ ] Contacter les clients en cas de paiements échoués
+- [ ] Analyser les métriques de conversion
+- [ ] Optimiser le tunnel de paiement
+- [ ] Mettre à jour la documentation technique
+
+---
+
+## Ressources Supplémentaires
+
+### Documentation Officielle
+- **Documentation API** : https://developer.flutterwave.com/
+- **Dashboard** : https://app.flutterwave.com/
+- **Support** : https://flutterwave.com/support
+
+### SDKs Officiels
+- **Node.js** : `npm install flutterwave-node-v3`
+- **PHP** : `composer require flutterwavedev/flutterwave-v3`
+- **Ruby** : `gem install flutterwave_sdk`
+- **Python** : `pip install flutterwave`
+
+### Outils Utiles
+- **Postman Collection** : Testez l'API directement
+- **ngrok** : Pour tester les webhooks localement
+- **GitHub** : https://github.com/Flutterwave
+
+### Support
+- **Email** : [email protected]
+- **Chat** : Via le dashboard
+- **Communauté** : Slack, Discord
+
+---
+
+## FAQ
+
+**Q : Combien de temps pour activer mon compte Live ?**
+R : Généralement 1-3 jours ouvrables après soumission des documents.
+
+**Q : Quels sont les frais ?**
+R : Varie selon le pays et le volume. Contactez Flutterwave pour les détails.
+
+**Q : Puis-je accepter les paiements internationaux ?**
+R : Oui, cartes Visa/Mastercard internationales acceptées.
+
+**Q : Comment gérer les remboursements ?**
+R : Via l'API de remboursement ou depuis le dashboard.
+
+**Q : Les paiements Mobile Money sont-ils instantanés ?**
+R : Oui, mais peuvent prendre quelques minutes selon l'opérateur.
+
+**Q : Puis-je personnaliser la page de paiement ?**
+R : Oui, via les paramètres de customization (logo, couleurs, etc.).
+
+**Q : Que faire si ma clé est compromise ?**
+R : Générer immédiatement de nouvelles clés depuis le dashboard.
+
+---

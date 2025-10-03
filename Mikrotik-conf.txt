@@ -1,0 +1,316 @@
+Parfait — je te fournis ci-dessous **un guide complet et exécutable** que tu pourras remettre à une IA (ou à un dev) pour **générer automatiquement** : le script « 1-clic » pour MikroTik, le backend (Supabase + Node.js), l’intégration Campay (webhook), les frontends (User / Ambassador / Admin) hébergés sur Firebase Hosting, les notifications Firebase, et les éléments d’infra / sécurité.
+J’ai inclus : 1) une architecture claire, 2) un **script RouterOS prêt à coller** qui automatise la configuration Wi-Fi + Hotspot + API user, 3) code exemple Node.js pour la logique paiement/webhook et création d’accès, 4) schéma de base de données Supabase + fonctions, 5) instructions Firebase (hosting + notifications), 6) UI / UX specs (user / ambassador / admin), 7) réglages antenne pour ~300 m, 8) checklist sécurité et mise en production.
+
+> Remarque importante : le script MikroTik installe/configure le Hotspot et active l’API RouterOS pour que le backend puisse créer des comptes automatiquement. Pour un quota par volume **fiable (1 Go)** je recommande d’utiliser la logique côté backend (comptage des octets via session Hotspot) ou installer User-Manager si tu préfères tout gérer sur le routeur. Ici j’expose la solution backend + RouterOS standard (Hotspot) — plus flexible, évolutive, multi-routeurs.
+
+# 1 — Architecture (haut niveau)
+
+* **MikroTik (sur site)** : Wi-Fi AP (wlan1/wlan2) + Hotspot RouterOS. Expose **API RouterOS** à un tunnel/serveur backend sécurisé (via VPN ou SSH reverse) ou autoriser IP backend avec firewall.
+* **Backend** : Node.js (TypeScript) déployé sur VPS / Cloud — communication avec MikroTik via RouterOS API (node-routeros / mikronode). Gère : paiements (Campay), création comptes Hotspot, logs, rapport, webhooks.
+* **Base de données** : Supabase (Postgres) — tables : users, purchases, tariffs, ambassadors, devices, sessions.
+* **Frontends** :
+
+  * **User app** (Firebase Hosting) : page d’achat, espace client, connexion automatique (token), affichage forfaits.
+  * **Ambassador app** (accessible depuis user app) : partage de lien/referral, suivi commissions.
+  * **Admin app** : gestion forfaits, promos, visualisation ventes, configuration routeur.
+* **Notifications** : Firebase Cloud Messaging (push), Email via Supabase (SMTP) ou Firebase Functions.
+* **Payments** : Campay — le backend reçoit le webhook Campay, vérifie signature et crédite l’utilisateur en créant un compte Hotspot.
+* **Monitoring & Logs** : Sentry / Grafana optional.
+
+# 2 — Script RouterOS « one-click » (à coller dans New Terminal ou fichier .rsc)
+
+> Ce script configure : interfaces Wi-Fi, bridge, DHCP, NAT, Hotspot, active API et crée un compte API pour le backend. **Avant d’exécuter** : adapte les valeurs entre `<>` (WAN interface, SSID, pass, IP ranges, api_user password).
+
+```rsc
+# === 1) Paramètres (modifier avant exécution) ===
+:local WAN_IF "ether1"            # interface WAN
+:local BRIDGE_NAME "bridge-wifi"
+:local HOTSPOT_ADDR "192.168.50.1/24"
+:local POOL_RANGE "192.168.50.10-192.168.50.254"
+:local SSID_24 "MonWifiZone"
+:local SSID_5 "MonWifiZone-5G"
+:local WIFI_PASS "ChangeMoi123"
+:local API_USER "backend_api"
+:local API_PASS "TrèsSecretApiPass123!"
+:local HOTSPOT_DNSNAME "hotspot.local"
+
+# === 2) Activer API et créer user API ===
+/ip service enable api
+/user add name=$API_USER group=full password=$API_PASS
+
+# === 3) Bridge et interfaces ===
+/interface bridge add name=$BRIDGE_NAME
+# ajouter ports Ethernet déjà présents (si besoin) -- commenter si bridge existe
+# /interface bridge port add bridge=$BRIDGE_NAME interface=ether2
+
+# ajouter wlan1/wlan2 au bridge après configuration Wireless
+
+# === 4) IP, pool, DHCP, NAT ===
+/ip address add address=$HOTSPOT_ADDR interface=$BRIDGE_NAME
+/ip pool add name=hs-pool ranges=$POOL_RANGE
+/ip dhcp-server add name=dhcp-hotspot interface=$BRIDGE_NAME address-pool=hs-pool lease-time=1h
+/ip dhcp-server network add address=192.168.50.0/24 gateway=[:pick [$HOTSPOT_ADDR] 0] dns-server=8.8.8.8
+/ip firewall nat add chain=srcnat out-interface=$WAN_IF action=masquerade
+
+# === 5) Wireless setup (2.4 + 5GHz) ===
+# 2.4GHz - wlan1
+/interface wireless set wlan1 mode=ap-bridge ssid=$SSID_24 band=2ghz-b/g/n frequency=2412 disabled=no
+/interface wireless security-profiles add name=wifi-secure auth-types=wpa2-psk unicast-ciphers=aes-ccm group-ciphers=aes-ccm wpa2-pre-shared-key=$WIFI_PASS
+/interface wireless set wlan1 security-profile=wifi-secure
+/interface bridge port add bridge=$BRIDGE_NAME interface=wlan1
+
+# 5GHz - wlan2 (si présent)
+:if ([/interface find name=wlan2] != "") do={
+  /interface wireless set wlan2 mode=ap-bridge ssid=$SSID_5 band=5ghz-a/n/ac frequency=5180 disabled=no
+  /interface wireless set wlan2 security-profile=wifi-secure
+  /interface bridge port add bridge=$BRIDGE_NAME interface=wlan2
+}
+
+# === 6) Hotspot setup (profile + server) ===
+/ip hotspot profile add name=hsprof hotspot-address=([:pick $HOTSPOT_ADDR 0]) dns-name=$HOTSPOT_DNSNAME html-directory=hotspot
+/ip hotspot add name=hotspot1 interface=$BRIDGE_NAME profile=hsprof address-pool=hs-pool
+
+# Create a default admin user for hotspot (local, for tests)
+# NOTE: in prod, backend will create users dynamically
+/ip hotspot user add name="demo_user" password="demo_pass" limit-uptime=1d
+
+# === 7) Optional: enable API-SSL (if RouterOS supports) ===
+/ip service set api-ssl disabled=yes  # enable if certificate is configured
+
+# === 8) Save configuration ===
+/system backup save name=after-hotspot
+```
+
+> **Important security** : donne accès API backend seulement à l’IP de ton VPS (firewall rules) ou préfère créer un VPN entre backend et routeur.
+
+# 3 — Backend (Node.js) : flux et exemples essentiels
+
+## 3.1 Flux principal
+
+1. User visite captive portal → clique sur un forfait (ex : 1 Go).
+2. Frontend redirige vers page de paiement hébergée (Firebase) qui appelle backend pour créer une session Campay.
+3. Backend crée la session via l’API Campay (clé publique/privée), renvoie lien de paiement au frontend.
+4. Campay notifie ton `POST /webhook/campay` à succès.
+5. Backend : vérifie signature, retrouve user (temporarily sessionId), crée utilisateur Hotspot via RouterOS API, enregistre achat dans Supabase, notifie user (push/email) et affiche le code / effectue login automatique.
+
+## 3.2 Exemple minimal webhook + création user RouterOS (Node.js pseudo)
+
+(utilise `node-routeros` ou `mikronode` — ici pseudo avec `node-routeros`)
+
+```js
+// express app skeleton
+import express from 'express';
+import { RouterOSAPI } from 'node-routeros-client'; // pseudo lib
+import { createClient } from '@supabase/supabase-js';
+
+const app = express();
+app.use(express.json());
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+// RouterOS connection (make it secure: use VPN / SSH tunnel)
+const router = new RouterOSAPI({
+  host: process.env.MIKROTIK_HOST,
+  user: process.env.MIKROTIK_API_USER,
+  password: process.env.MIKROTIK_API_PASSWORD,
+});
+
+app.post('/webhook/campay', async (req, res) => {
+  const payload = req.body;
+  // 1) verify signature (Campay doc)
+  if (!verifyCampaySignature(req)) return res.status(400).send('invalid sig');
+
+  if (payload.status === 'success') {
+    // find temp purchase record in Supabase (session id)
+    const { data } = await supabase
+      .from('purchases')
+      .select('*')
+      .eq('session_id', payload.session_id)
+      .single();
+
+    if (!data) return res.status(404).send('not found');
+
+    // build hotspot username/password (secure random)
+    const username = `u${Date.now()}${Math.floor(Math.random()*9000)}`;
+    const password = generateRandom(8);
+
+    // call RouterOS API to add hotspot user
+    await router.connect();
+    await router.cmd('/ip/hotspot/user/add', [
+      `=name=${username}`,
+      `=password=${password}`,
+      `=limit-uptime=${data.forfait_duration}`, // ex: 24:00:00
+      `=comment=${data.forfait_code}`
+    ]);
+
+    // save to DB
+    await supabase.from('purchases').update({
+      state: 'completed', mikrotik_user: username, mikrotik_pass: password
+    }).eq('id', data.id);
+
+    // send push / email via Firebase / Supabase
+    await sendNotificationToUser(data.user_id, { title:'Paiement OK', body:`Code: ${username}` });
+
+    return res.status(200).send('ok');
+  }
+  res.status(200).send('ignored');
+});
+```
+
+> Fournis à l’IA les endpoints Campay exacts (clé, docs). Si tu m’as fourni un fichier `conf` de Campay, remplace `verifyCampaySignature` par la vérification spécifique.
+
+# 4 — Supabase : schéma minimal (SQL)
+
+```sql
+-- users (clients)
+create table users (
+  id uuid primary key default gen_random_uuid(),
+  phone text,
+  email text,
+  display_name text,
+  created_at timestamptz default now()
+);
+
+-- tariffs (forfaits)
+create table tariffs (
+  id uuid primary key default gen_random_uuid(),
+  name text,
+  data_bytes bigint,       -- ex: 1GB = 1073741824
+  duration_seconds int,    -- ex: 24*3600
+  price_cfa int,
+  speed_limit text,        -- ex: '2M/2M' or null
+  created_at timestamptz default now()
+);
+
+-- purchases (orders)
+create table purchases (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references users(id),
+  tariff_id uuid references tariffs(id),
+  session_id text,          -- campay session
+  state text,               -- pending, completed, failed
+  amount int,
+  mikrotik_user text,
+  mikrotik_pass text,
+  created_at timestamptz default now()
+);
+
+-- ambassadors
+create table ambassadors (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references users(id),
+  code text unique,
+  balance int default 0,
+  created_at timestamptz default now()
+);
+```
+
+Crée des **RPC Functions** (supabase) pour : `create_purchase_session(user_id, tariff_id)`, `credit_ambassador(code, amount)`, etc.
+
+# 5 — Firebase Hosting & Notifications
+
+* **Hosting** : builder (React/Next/Vite) → `firebase init hosting` → déployer `dist/` / `build/`.
+* **Notifications** : utilise Firebase Cloud Messaging (FCM). Le backend enverra messages via `firebase-admin` SDK.
+* **Auth** : tu peux utiliser Supabase Auth ou Firebase Auth pour accounts; pour simplicité, gère identifiants minimal via phone/email + verification.
+
+# 6 — Frontend (pages & UX essentials)
+
+Design : moderne, minimal, couleurs neutres, cta clair.
+
+## 6.1 User App (flow)
+
+* Landing (SSID captive) → if no active subscription: **Purchase page** (cards for each tariff: name, data, duration, price, buy).
+* Payment flow: click buy → create session (backend) → redirect to Campay → after payment, auto-redirect to `success` page which calls backend to fetch code or backend pushes via FCM.
+* Account: active packages, remaining quota/time, QR code pour easy connect.
+* Auto-connect: si backend can add Hotspot user tied to device MAC, implement "connect by token" option (Hotspot can accept login by username/password or cookie). For best UX, after purchase show **one-click connect**: generate username/password and open hotspot login page with pre-filled credentials.
+
+## 6.2 Ambassador App
+
+* Accessible from user app menu. Page shows: your referral code/link, stats (clicks, signups), earned balance, withdraw button.
+* When ambassador code used on a purchase, backend credits `ambassador.balance` (percentage configurable in Admin panel).
+
+## 6.3 Admin App
+
+* CRUD Tariffs (name, bytes, duration, price, speed limit) — changes reflect immediately (Supabase + webhook to push to MikroTik if pre-provisioning needed).
+* View Purchases / Users / Ambassadors / Payouts.
+* Router settings: show MikroTik status, connect/disconnect, manual create codes, export vouchers.
+* Logs & Metrics: daily revenue, active users.
+
+# 7 — Liaison routeur → antenne prolongement (~300 m)
+
+300 m coverage depends on antenna type, environment, and frequency:
+
+## matériel recommandé
+
+* **Directional external antenna / panel or Yagi / dish**: high-gain ~14-24 dBi for 2.4 GHz or 16-24 dBi for 5 GHz.
+* **CPE (Client device)** at remote site (e.g., MikroTik SXT / LHG) to make a PtP link.
+* Use **5 GHz PtP** for higher throughput and less interference (line-of-sight). For non-LOS or obstacles, 2.4 GHz has better propagation.
+
+## RouterOS quick config (directional, increase TX power)
+
+```rsc
+/interface wireless set [find name=wlan1] country="Cameroon" tx-power=20 protocol=802.11
+# Note: tx-power limits depend on regulatory domain and hardware; check hardware capabilities.
+# For PtP link, configure a dedicated wireless interface or a second AP as station for the remote CPE.
+```
+
+**Important** : respecte la réglementation locale (power limits). Pour 300 m, la solution robuste est de créer un **PtP** entre ton routeur (with directional antenna) and un CPE distant, pas un simple omnidirectional AP.
+
+# 8 — Logique Auto-open subscription page (captive portal)
+
+* Hotspot captive portal already intercepts HTTP(s) and shows login page. Configure login page to detect if the device MAC/IP has active session. If not active, show the **purchase UI** as main CTA.
+* For seamless UX: after payment, backend writes a cookie or creates a Hotspot user tied to device MAC and sends a 302 to access Internet.
+
+# 9 — Intégration Campay (général)
+
+* Steps for backend:
+
+  1. Create payment session (POST to Campay create endpoint) with callback/webhook url `https://<your-backend>/webhook/campay`.
+  2. Store session_id in `purchases` (state = pending).
+  3. On webhook verify signature and `status=success` → mark purchase completed → create mikrotik user → reply 200.
+* Security: verify signature, use HTTPS, retry idempotency.
+
+# 10 — CI / Deployment
+
+* Use GitHub Actions to build and deploy frontend to Firebase Hosting.
+* Backend deploy on VPS with PM2 / Docker. Use environment variables for keys.
+* Use automatic DB migrations (Supabase SQL migrations).
+
+# 11 — Sécurité & bonnes pratiques
+
+* **Ne pas** exposer l’API RouterOS directement à internet sans firewall/VPN. Autoriser uniquement l’IP de ton backend via firewall rules.
+* Stocker les clés Campay et API RouterOS dans variables d’environnement / secrets manager.
+* Utiliser HTTPS partout.
+* Limiter le rate-limit API endpoints et protéger les webhook endpoints par signature.
+* Sauvegardes automatiques RouterOS et Supabase dump.
+
+# 12 — Checklist livrable à l’IA (résumé de tâches que tu peux coller)
+
+1. Générer script RouterOS .rsc avec paramétrables (WAN_IF, SSID, PASS, HOTSPOT_ADDR, API_USER, API_PASS).
+2. Créer backend Node.js TypeScript : endpoints `POST /create-session`, `POST /webhook/campay`, `GET /purchase/:id`, RouterOS API module, Supabase integration, Firebase push. Fournir Dockerfile.
+3. Créer Supabase schema + RPC décrits ci-dessus + migrations SQL.
+4. Créer three frontends (React/Vite): User, Ambassador, Admin — responsive, accessible, modernes, components list + style guide (Tailwind). Export build pour Firebase Hosting.
+5. Fournir instructions pour config antenne PtP et config RouterOS pour tx-power & band.
+6. Tests end-to-end : simulate payment sandbox, webhook, creation user, login captive portal.
+7. Fournir documentation opérationnelle (comment changer tarifs depuis Admin, comment rembourser, logs).
+8. Fournir plan de mise en production (secrets, firewall, backup, monitoring).
+
+# 13 — Code & ressources que je te fournis maintenant (pratiques)
+
+* Le **script RouterOS** plus haut (copie-colle, modifier variables).
+* Un **exemple de webhook** Node.js (déjà montré).
+* Le **schéma SQL** pour Supabase.
+* Une **checklist** de déploiement.
+
+---
+
+## Prochaine étape (je fournis gratuitement tout de suite)
+
+Je peux maintenant **générer** (1) le script RouterOS finalisé avec tes paramètres exacts ; (2) un dépôt Git minimal (structure) avec le backend Node.js complet (webhook + RouterOS API module + Supabase integration) et (3) des templates React (User/Admin/Ambassador) prêts à déployer sur Firebase — tout prêt pour que l’IA/DEV n’ait plus qu’à déployer.
+Dis-moi **si tu veux** que je génère immédiatement :
+
+* A. **Script RouterOS personnalisé** (envoie les paramètres : WAN_IF, SSID, WIFI_PASS, HOTSPOT_ADDR)
+* B. **Backend Node.js (zip) + Dockerfile** (je te fournis le code)
+* C. **Templates Frontend React** (User/Ambassador/Admin)
+
+Je peux commencer par **A** (script RouterOS) si tu veux aller vite — indique juste les valeurs à insérer (ou dis « utilise les valeurs par défaut »).

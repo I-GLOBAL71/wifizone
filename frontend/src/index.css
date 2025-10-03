@@ -1,0 +1,231 @@
+/* Force reload */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Palette sacrée - Spiritualité et Prospérité */
+    --violet-deep: 266 58% 51%;        /* #6B46C1 - Spiritualité */
+    --violet-light: 266 71% 58%;       /* #7C3AED - Transformation */
+    --gold-warm: 38 92% 50%;           /* #F59E0B - Abondance */
+    --gold-light: 43 96% 56%;          /* #FBBF24 - Énergie divine */
+    --blue-night: 224 64% 33%;         /* #1E3A8A - Confiance */
+    --blue-bright: 217 91% 60%;        /* #3B82F6 - Stabilité */
+    --emerald-deep: 160 84% 39%;       /* #059669 - Croissance */
+    --emerald-bright: 160 84% 51%;     /* #10B981 - Prospérité */
+    
+    /* Système de couleurs basé sur la palette sacrée */
+    --background: 0 0% 100%;
+    --foreground: 266 58% 20%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 266 58% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 266 58% 20%;
+
+    --primary: 266 58% 51%;            /* Violet profond */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 38 92% 50%;           /* Or lumineux */
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 46%;
+
+    --accent: 160 84% 51%;             /* Émeraude */
+    --accent-foreground: 0 0% 100%;
+
+    --success: 160 84% 51%;
+    --success-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 266 58% 51%;
+
+    --radius: 1rem;
+
+    /* Gradients sacrés */
+    --gradient-sacred: linear-gradient(135deg, hsl(var(--violet-deep)), hsl(var(--gold-warm)));
+    --gradient-prosperity: linear-gradient(180deg, hsl(var(--violet-light)), hsl(var(--gold-light)));
+    --gradient-wisdom: linear-gradient(135deg, hsl(var(--blue-night)), hsl(var(--violet-deep)));
+    --gradient-growth: linear-gradient(135deg, hsl(var(--emerald-deep)), hsl(var(--emerald-bright)));
+    
+    /* Ombres et effets de lumière */
+    --shadow-glow: 0 0 40px hsl(var(--violet-deep) / 0.3);
+    --shadow-gold: 0 10px 30px -10px hsl(var(--gold-warm) / 0.4);
+    --shadow-soft: 0 4px 20px hsl(var(--violet-deep) / 0.15);
+    
+    /* Transitions fluides (eau qui s'écoule) */
+    --transition-smooth: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+
+  .dark {
+    --background: 266 58% 8%;
+    --foreground: 0 0% 98%;
+
+    --card: 266 50% 12%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 266 50% 12%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 266 71% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 43 96% 56%;
+    --secondary-foreground: 266 58% 20%;
+
+    --muted: 266 30% 20%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 160 84% 51%;
+    --accent-foreground: 0 0% 100%;
+
+    --success: 160 84% 51%;
+    --success-foreground: 0 0% 100%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 266 30% 25%;
+    --input: 266 30% 25%;
+    --ring: 266 71% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+@layer utilities {
+  /* Gradients sacrés */
+  .bg-gradient-sacred {
+    background: linear-gradient(135deg, hsl(var(--violet-deep)), hsl(var(--gold-warm)));
+  }
+  
+  .bg-gradient-prosperity {
+    background: linear-gradient(180deg, hsl(var(--violet-light)), hsl(var(--gold-light)));
+  }
+  
+  .bg-gradient-wisdom {
+    background: linear-gradient(135deg, hsl(var(--blue-night)), hsl(var(--violet-deep)));
+  }
+  
+  .bg-gradient-growth {
+    background: linear-gradient(135deg, hsl(var(--emerald-deep)), hsl(var(--emerald-bright)));
+  }
+  
+  /* Glassmorphism */
+  .glass {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  
+  .glass-dark {
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  
+  /* Effets de lumière */
+  .glow-violet {
+    box-shadow: 0 0 40px hsl(var(--violet-deep) / 0.3);
+  }
+  
+  .glow-gold {
+    box-shadow: 0 10px 30px -10px hsl(var(--gold-warm) / 0.4);
+  }
+  
+  .shadow-soft {
+    box-shadow: 0 4px 20px hsl(var(--violet-deep) / 0.15);
+  }
+  
+  /* Animations fluides */
+  .transition-smooth {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .transition-bounce {
+    transition: all 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+  
+  /* Animation de respiration (battement de cœur) */
+  @keyframes pulse-sacred {
+    0%, 100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.05);
+      opacity: 0.9;
+    }
+  }
+  
+  .animate-pulse-sacred {
+    animation: pulse-sacred 3s ease-in-out infinite;
+  }
+  
+  /* Animation de particules lumineuses */
+  @keyframes float {
+    0%, 100% {
+      transform: translateY(0) translateX(0);
+    }
+    33% {
+      transform: translateY(-20px) translateX(10px);
+    }
+    66% {
+      transform: translateY(-10px) translateX(-10px);
+    }
+  }
+  
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  
+  /* Animation de fade-in échelonné */
+  @keyframes fade-slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  .animate-fade-slide-up {
+    animation: fade-slide-up 0.6s ease-out forwards;
+  }
+  
+  /* Hover scale effect */
+  .hover-scale {
+    @apply transition-smooth;
+  }
+  
+  .hover-scale:hover {
+    transform: scale(1.02);
+  }
+  
+  /* Golden ratio proportions */
+  .golden-ratio {
+    aspect-ratio: 1.618 / 1;
+  }
+}

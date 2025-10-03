@@ -1,0 +1,21 @@
+# Supabase project configuration.
+# For a full list of options, refer to the Supabase CLI reference:
+# https://supabase.com/docs/reference/cli/config
+
+[api]
+schemas = ["public", "storage", "graphql"]
+max_rows = 1000
+
+[db]
+major_version = 15
+
+[studio]
+port = 54323
+
+[auth]
+site_url = "http://localhost:8080"
+additional_redirect_urls = ["http://localhost:8080/auth/callback"]
+
+# Define settings for the specific function.
+[functions.get-firebase-token]
+# You can specify function-specific settings here if needed in the future.
